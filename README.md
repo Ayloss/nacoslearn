@@ -37,6 +37,9 @@ nacos的服务注册中心地址就需要配置在这个地方。
 ```properties
 spring: Hoxton.RC2
 nacos: 1.1.4
+# 某名奇妙地discovery下不了2.1.1.RELEASE的版本，但2.1.0.RELEASE版本却可以
+spring-cloud-starter-alibaba-nacos-discovery: 2.1.0.RELEASE
+spring-cloud-starter-alibaba-nacos-config: 2.1.1.RELEASE 
 ```
 
 以下所有的演示都只在本机，使用本机模拟分布式的环境。一开始将使用单机模式进行演示。
@@ -45,7 +48,7 @@ nacos: 1.1.4
 
 ### 创建配置
 
-首先我们在nacos的控制台中新增两个类型为**properties**的配置: provider和consumer, 代表这是provider和consumer两种服务的配置。
+首先在nacos的控制台中新增两个类型为**properties**的配置: provider和consumer, 代表这是provider和consumer两种服务的配置。
 
 **这个配置的名称(Data Id)不能随便起，会关系到spring cloud项目能否读取到这个配置。**
 
@@ -84,7 +87,7 @@ ${prefix}-${spring.profile.active}.${file-extension}
 
 默认情况下，prefix的值即为`spring.application.name`的值。也可以通过配置项 `spring.cloud.nacos.config.prefix`来修改prefix。
 
-配置ok之后，让我们启动一下provider项目，可以看到，我们没在application.properties里配置tomcat的端口，应用按照nacos上配置的服务端口启动了。说明配置生效了。
+配置ok之后，启动一下provider项目，可以看到，我们没在application.properties里配置tomcat的端口，应用按照nacos上配置的服务端口启动了。说明配置生效了。
 
 ![](./img/img0004.png)
 
@@ -92,7 +95,7 @@ ${prefix}-${spring.profile.active}.${file-extension}
 
 在nacos配置的配置项可以像在application.properties中的配置项一样注入到程序中。
 
-现在我们给provider增加一个配置类和一个controller接口，以展示配置是否成功注入。
+现在给provider增加一个配置类和一个controller接口，以展示配置是否成功注入。
 
 ```java
 // 配置类
@@ -142,3 +145,57 @@ public class PropertyController {
 ![](./img/img0007.png)
 
 可以看到配置及时地发生了变更。
+
+### 配置变更监听
+
+当配置发生变更的时候，有时候我们可能会想做一些额外的事情，比如记录一下log。nacos提供了对配置变更事件的监听，但目前官方文档中的方式在当前版本(**nacos-spring-cloud-cofig 2.1.1.RELEASE**)并不支持在spring cloud下使用。以下是相关的issued
+
+- <https://github.com/alibaba/spring-cloud-alibaba/issues/830>
+- <https://github.com/alibaba/spring-cloud-alibaba/issues/825>
+
+目前可以采用监听spring事件的方式实现,方法来自[Spring Cloud @RefreshScope和@EventListener实现Nacos配置更新监听](<http://appblog.cn/2019/09/18/Spring%20Cloud%20@RefreshScope%E5%92%8C@EventListener%E5%AE%9E%E7%8E%B0Nacos%E9%85%8D%E7%BD%AE%E6%9B%B4%E6%96%B0%E7%9B%91%E5%90%AC/>)
+
+现在我们给ConfigProperties类添加一个对EnvironmentChangeEvent的监听事件, 并注入Spring的Environment以便拿到变化后的值
+
+```java
+@Component
+@RefreshScope
+@Data
+@Slf4j // lombok的注解，将自动生成一个log field
+public class ConfigProperties {
+
+    @Value("${third.service.host}")
+    private String thirdServiceHost;
+
+    @Value("${local.id}")
+    private String localID;
+
+    // 注入Environment以便拿到变化后的值
+    @Autowired
+    private Environment env;
+
+    // 目前版本暂时不支持
+    @NacosConfigListener(dataId = "provider")
+    public void onMessage(Properties config) {
+        log.info("config changed: {}", config);
+    }
+
+    @EventListener(EnvironmentChangeEvent.class)
+    public void refreshEvent(EnvironmentChangeEvent event) {
+        StringBuilder mes = new StringBuilder();
+        mes.append("listening config event\n");
+
+        // 遍历所有变化后的key,从environment中拿到值并输出
+        for (String key : event.getKeys()) {
+            mes.append("changed properties key=").append(key).append(", new value=").append(env.getProperty(key)).append("\n");
+        }
+
+        log.info(mes.toString());
+    }
+}
+```
+
+现在，让我们再更改一下nacos上的配置的值，从控制台可以看到Nacos监听到了变更，并打印了变更的值。我们自定义的EventListener也打印出相应的输出。但@NacosConfigListener并没有生效。
+
+![](./img/img0008.png)
+
