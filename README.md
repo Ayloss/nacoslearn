@@ -199,3 +199,163 @@ public class ConfigProperties {
 
 ![](./img/img0008.png)
 
+## 服务注册中心
+
+### 服务接入
+
+服务接入nacos非常简单，只要在bootstrap.properties中加入nacos的地址和应用的名称即可。
+
+前边在provider的bootstrap.properties文件中已经加入了这个配置。
+
+```properties
+spring.cloud.nacos.config.server-addr=localhost:8848
+# 这个应用的名称也是必须配置的
+spring.application.name=provider
+```
+
+打开nacos的控制台，可以看到服务已经注册到nacos上。
+
+![](./img/img0009.png)
+
+### openfeign服务调用与负载均衡
+
+nacos支持spring cloud的open feign服务调用，可以用原生的open feign方式调用微服务，不需要额外修改代码。
+
+现在，在provider上增加一个模拟的服务的接口，这个服务打印出一段hello world消息。后边将会启动2个provider服务。
+
+```java
+@RestController
+@RequestMapping("/hello")
+@Slf4j
+public class HelloController {
+
+    @Autowired
+    private ConfigProperties properties;
+
+    @GetMapping("sayHello")
+    public String sayHello(@RequestParam String greet) {
+        log.info("greet received {}", greet);
+        return "Hello world from: " + properties.getLocalID();
+    }
+}
+```
+
+为测试openfeign的负载均衡功能，我们增加了一个配置属性local-id，以区分具体是哪个服务返回的消息。
+
+```properties
+# application.properties文件
+
+## 第一个provider
+### 在本地模拟时，为启动多个provider,需要先去掉nacos上的server.port配置
+server.port=8081 
+local.id=provider A
+
+## 第二个provider
+server.port=8082
+local.id=provider B
+```
+
+然后在consumer中增加一个接口来调用provider服务
+
+```java
+// ServiceController.java
+@RestController
+@RequestMapping("/hello")
+public class ServiceController {
+
+    @Autowired
+    private HelloApi helloApi;
+
+    @GetMapping("/sayHello")
+    public String sayHello(@RequestParam String greet){
+        return helloApi.sayHello(greet);
+    }
+}
+
+// HelloApi.java
+@Component
+@FeignClient(name="provider") // 被调用的服务名
+public interface HelloApi {
+
+    @GetMapping("/hello/sayHello")
+    String sayHello(@RequestParam("greet") String greet);
+}
+```
+
+并在nacos上增加consumer的配置
+
+```properties
+server.port=8899
+```
+
+完成后，可以把provider和consumer一起启动了。使用idea在本地模拟分布式时，要启动2个provider, 可以启动完第一个后，修改一下provider配置中的server.port，再启动第二个。
+
+这个时候nacos上将会出现2组3个服务
+
+![](./img/img0010.png)
+
+接着多次访问 <http://localhost:8899/hello/sayHello?greet=hello>，可以看到以下2种输出
+
+![](./img/img0011.png)
+
+![](./img/img0012.png)
+
+### hystrix熔断
+
+如果远端的服务不可用时，需要有快速失败的机制防止服务雪崩。open feign的hystrix熔断在nacos下使用方式和原生的也是一样的。
+
+现在，给consumer增加一个hystrix。增加的方式是直接实现open feign的接口。
+
+```java
+@Component
+public class HelloApiHystrix implements HelloApi {
+
+    @Override
+    public String sayHello(@RequestParam("greet") String greet) {
+        return "the provider has crashed! service currently unavailable";
+    }
+}
+```
+
+并在原HelloApi上，增加fallback属性
+
+```java
+@Component
+@FeignClient(name="provider", fallback = HelloApiHystrix.class)
+public interface HelloApi {
+
+    @GetMapping("/hello/sayHello")
+    String sayHello(@RequestParam("greet") String greet);
+}
+```
+
+要测试服务全部崩溃的情况，可以用nacos控制台的服务上线、下线功能。此功能并不是真的将服务关掉，而是将服务从可调用的列表中排除掉。
+
+将2个provider全部下线
+
+![](./img/img0013.png)
+
+这个时候继续去访问http://localhost:8899/hello/sayHello?greet=hello
+
+![](./img/img0014.png)
+
+可以看到快速失败完成。
+
+只上线一个服务
+
+![](./img/img0015.png)
+
+不管访问几次，都只有一个provider提供调用
+
+![](./img/img0016.png)
+
+可能会出现把服务下线之后, 依旧能够调用到服务的情况。因为spring-cloud-nacos会每隔一段时间去获取可用的服务地址，默认间隔为30s，可以在boostrap.properties中修改以下配置以修改时间。
+
+```properties
+spring.cloud.nacos.discovery.watch-delay=30000
+```
+
+
+
+## nacos集群部署
+
