@@ -363,7 +363,7 @@ spring.cloud.nacos.discovery.watch-delay=30000
 
 
 ## 使用mysql作为数据库
-默认情况下，nacos采用嵌入式数据库。nacos官方建议在生产环境采用高可用数据库，位于nacos目录下的**conf/nacos-mysql.sql**为官方提供的建库脚本。
+默认情况下，nacos采用**Derby**嵌入式数据库。nacos官方建议在生产环境采用高可用数据库，位于nacos目录下的**conf/nacos-mysql.sql**为官方提供的建库脚本。
 
 登录mysql, 使用以下命令将nacos建库语句导入
 
@@ -395,5 +395,119 @@ db.password=root
 
 注意的是，nacos并不会自动将嵌入式的数据库中的记录迁移到mysql中。如果有旧版本的配置，需要手动迁移。
 
-## nacos集群部署
 
+
+### 多数据库做主备
+
+如果有多个数据库做主备，配置方法和spring中配置多数据库的方法一致。
+
+```properties
+## 配置实例
+# 有几个数据库实例
+db.num=2
+# 第1个数据库实例的地址
+db.url.0=jdbc:mysql://192.168.56.101:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+# 第2个数据库实例的地址
+db.url.1=jdbc:mysql://192.168.56.102:3306/nacos_devtest?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+
+```
+
+## 集群部署
+
+### nacos集群配置
+
+集群部署需要修改nacos的集群配置文件。
+
+nacos目录下有个**conf/cluster.conf.example**集群配置文件示例。默认情况下集群部署是不开启的。复制该文件，重命名为cluster.conf。往配置中增加集群的ip。
+
+```properties
+#it is ip
+#example
+localhost:8848
+localhost:8898
+```
+
+因为使用本机测试，所以这里的ip都是localhost。
+
+本机测试时，可以将nacos复制多份，分别修改nacos配置文件**application.properties**中的端口为不同的2个端口，以在本机启动2个实例。
+
+```properties
+# 第一个实例
+server.port=8848
+
+# 第二个实例
+server.port=8898
+```
+
+在windows下启动时，默认情况下是以单机模式启动的（linux默认以集群模式启动）,启动需要增加参数以支持集群模式。
+
+```bash
+startup.cmd -m cluster
+```
+
+这个时候启动可以看到启动打印出了集群的ip
+
+![](./img/img0019.png)
+
+访问其中的一个实例，在节点列表里可以看到集群里已经有2个实例。
+
+![](./img/img0020.png)
+
+### 集群下服务接入
+
+
+
+## nacos权限控制
+
+目前版本(1.1.3)nacos仅支持简单的用户名密码权限控制，虽然有roles这张表，但还没有用上。
+
+官方issue中有未来增加权限控制的计划，可以追踪[#1105](https://github.com/alibaba/nacos/issues/1105)此issue
+
+### 增加用户
+
+控制台目前的版本不支持增加用户，需要手动往mysql中插入用户的记录。
+
+nacos源码中的 [PasswordEncoderUtil ](https://github.com/alibaba/nacos/blob/develop/console/src/main/java/com/alibaba/nacos/console/utils/PasswordEncoderUtil.java) (位于com.alibaba.nacos.console.utils.PasswordEncoderUtil.main)用来加密密码，可以将此源码复制到spring项目中执行生成用户的密码。
+
+```java
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
+/**
+ * Password encoder tool
+ *
+ * @author nacos
+ */
+public class PasswordEncoderUtil {
+
+    public static void main(String[] args) {
+        System.out.println(new BCryptPasswordEncoder().encode("nacos"));
+    }
+
+    public static Boolean matches(String raw, String encoded) {
+        return new BCryptPasswordEncoder().matches(raw, encoded);
+    }
+
+    public static String encode(String raw) {
+        return new BCryptPasswordEncoder().encode(raw);
+    }
+}
+```
+
+用以上代码加密密码 **test** , 往mysql中插入一条记录
+
+```mysql
+INSERT INTO users (username, password, enabled) VALUES ('test', '$2a$10$0qXCjb0bBtWNcCUJAEC3KuJM1O3Z034N7bdZmrv/9h5mvfLKlwhLa', TRUE);
+INSERT INTO roles (username, role) VALUES ('test', 'ROLE_ADMIN');
+```
+
+使用此账号成功登录
+
+![](./img/img0021.png)
+
+
+
+## 参考文章
+
+1. [nacos官网](https://nacos.io/zh-cn/index.html)
+2. [spring boot系列文章 - 纯洁的微笑](http://www.ityouknow.com/spring-boot.html)
+3. [nacos github](https://github.com/alibaba/nacos)
