@@ -44,6 +44,12 @@ spring-cloud-starter-alibaba-nacos-config: 2.1.1.RELEASE
 
 以下所有的演示都只在本机，使用本机模拟分布式的环境。一开始将使用单机模式进行演示。
 
+### 安装mysql
+
+nacos默认采用嵌入式的数据库，如果要在生产环境使用，官方建议采用mysql作为数据库。
+
+[mysql windows 下载地址](https://dev.mysql.com/downloads/windows/installer/5.7.html)
+
 ## 配置服务使用
 
 ### 创建配置
@@ -56,7 +62,7 @@ spring-cloud-starter-alibaba-nacos-config: 2.1.1.RELEASE
 
 
 
-配置的内容如下
+在provider中增加如下配置
 
 ```properties
 #### provider配置
@@ -356,6 +362,38 @@ spring.cloud.nacos.discovery.watch-delay=30000
 ```
 
 
+## 使用mysql作为数据库
+默认情况下，nacos采用嵌入式数据库。nacos官方建议在生产环境采用高可用数据库，位于nacos目录下的**conf/nacos-mysql.sql**为官方提供的建库脚本。
+
+登录mysql, 使用以下命令将nacos建库语句导入
+
+```mysql
+create database nacos; # 可以改为你自己想要的数据库名
+use nacos;
+source /path/to/nacos/conf/nacos-mysql.sql
+```
+
+导入完成后，修改nacos目录下的**conf/application.properties**,加入以下的配置来配置mysql数据库
+
+```properties
+spring.datasource.platform=mysql
+
+db.num=1
+# url、用户名密码根据你自己的情况修改
+db.url.0=jdbc:mysql://localhost:3306/nacos?characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true
+db.user=root
+db.password=root
+```
+
+修改完以上配置后，启动/重启 nacos，往配置列表中加入一个配置。
+
+![](./img/img0017.png)
+
+在mysql中进行查询，看到相应的记录，说明数据库已经成功切换到mysql。
+
+![](./img/img0018.png)
+
+注意的是，nacos并不会自动将嵌入式的数据库中的记录迁移到mysql中。如果有旧版本的配置，需要手动迁移。
 
 ## nacos集群部署
 
